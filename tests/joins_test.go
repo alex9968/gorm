@@ -57,7 +57,7 @@ func TestJoinsForSlice(t *testing.T) {
 }
 
 func TestJoinConds(t *testing.T) {
-	var user = *GetUser("joins-conds", Config{Account: true, Pets: 3})
+	user := *GetUser("joins-conds", Config{Account: true, Pets: 3})
 	DB.Save(&user)
 
 	var users1 []User
@@ -102,6 +102,33 @@ func TestJoinConds(t *testing.T) {
 	if !regexp.MustCompile("SELECT .* FROM .users. left join pets.*join accounts.*").MatchString(stmt.SQL.String()) {
 		t.Errorf("joins should be ordered, but got %v", stmt.SQL.String())
 	}
+
+	iv := DB.Table(`table_invoices`).Select(`seller, SUM(total) as total, SUM(paid) as paid, SUM(balance) as balance`).Group(`seller`)
+	stmt = dryDB.Table(`table_employees`).Select(`id, name, iv.total, iv.paid, iv.balance`).Joins(`LEFT JOIN (?) AS iv ON iv.seller = table_employees.id`, iv).Scan(&user).Statement
+	if !regexp.MustCompile("SELECT id, name, iv.total, iv.paid, iv.balance FROM .table_employees. LEFT JOIN \\(SELECT seller, SUM\\(total\\) as total, SUM\\(paid\\) as paid, SUM\\(balance\\) as balance FROM .table_invoices. GROUP BY .seller.\\) AS iv ON iv.seller = table_employees.id").MatchString(stmt.SQL.String()) {
+		t.Errorf("joins should be ordered, but got %v", stmt.SQL.String())
+	}
+}
+
+func TestJoinOn(t *testing.T) {
+	user := *GetUser("joins-on", Config{Pets: 2})
+	DB.Save(&user)
+
+	var user1 User
+	onQuery := DB.Where(&Pet{Name: "joins-on_pet_1"})
+
+	if err := DB.Joins("NamedPet", onQuery).Where("users.name = ?", user.Name).First(&user1).Error; err != nil {
+		t.Fatalf("Failed to load with joins on, got error: %v", err)
+	}
+
+	AssertEqual(t, user1.NamedPet.Name, "joins-on_pet_1")
+
+	onQuery2 := DB.Where(&Pet{Name: "joins-on_pet_2"})
+	var user2 User
+	if err := DB.Joins("NamedPet", onQuery2).Where("users.name = ?", user.Name).First(&user2).Error; err != nil {
+		t.Fatalf("Failed to load with joins on, got error: %v", err)
+	}
+	AssertEqual(t, user2.NamedPet.Name, "joins-on_pet_2")
 }
 
 func TestJoinsWithSelect(t *testing.T) {
@@ -128,5 +155,32 @@ func TestJoinsWithSelect(t *testing.T) {
 
 	if len(results) != 2 || results[0].Name != user.Pets[0].Name || results[1].Name != user.Pets[1].Name {
 		t.Errorf("Should find all two pets with Join select, got %+v", results)
+	}
+}
+
+func TestJoinCount(t *testing.T) {
+	companyA := Company{Name: "A"}
+	companyB := Company{Name: "B"}
+	DB.Create(&companyA)
+	DB.Create(&companyB)
+
+	user := User{Name: "kingGo", CompanyID: &companyB.ID}
+	DB.Create(&user)
+
+	query := DB.Model(&User{}).Joins("Company")
+	// Bug happens when .Count is called on a query.
+	// Removing the below two lines or downgrading to gorm v1.20.12 will make this test pass.
+	var total int64
+	query.Count(&total)
+
+	var result User
+
+	// Incorrectly generates a 'SELECT *' query which causes companies.id to overwrite users.id
+	if err := query.First(&result, user.ID).Error; err != nil {
+		t.Fatalf("Failed, got error: %v", err)
+	}
+
+	if result.ID != user.ID {
+		t.Fatalf("result's id, %d, doesn't match user's id, %d", result.ID, user.ID)
 	}
 }

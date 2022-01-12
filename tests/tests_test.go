@@ -25,12 +25,15 @@ func init() {
 		os.Exit(1)
 	} else {
 		sqlDB, err := DB.DB()
-		if err == nil {
-			err = sqlDB.Ping()
-		}
-
 		if err != nil {
 			log.Printf("failed to connect database, got error %v", err)
+			os.Exit(1)
+		}
+
+		err = sqlDB.Ping()
+		if err != nil {
+			log.Printf("failed to ping sqlDB, got error %v", err)
+			os.Exit(1)
 		}
 
 		RunMigrations()
@@ -76,6 +79,10 @@ func OpenTestConnection() (db *gorm.DB, err error) {
 		db, err = gorm.Open(sqlite.Open(filepath.Join(os.TempDir(), "gorm.db")), &gorm.Config{})
 	}
 
+	if err != nil {
+		return
+	}
+
 	if debug := os.Getenv("DEBUG"); debug == "true" {
 		db.Logger = db.Logger.LogMode(logger.Info)
 	} else if debug == "false" {
@@ -87,7 +94,7 @@ func OpenTestConnection() (db *gorm.DB, err error) {
 
 func RunMigrations() {
 	var err error
-	allModels := []interface{}{&User{}, &Account{}, &Pet{}, &Company{}, &Toy{}, &Language{}}
+	allModels := []interface{}{&User{}, &Account{}, &Pet{}, &Company{}, &Toy{}, &Language{}, &Coupon{}, &CouponProduct{}, &Order{}}
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(allModels), func(i, j int) { allModels[i], allModels[j] = allModels[j], allModels[i] })
 
